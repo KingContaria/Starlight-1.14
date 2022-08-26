@@ -2,7 +2,7 @@ package ca.spottedleaf.starlight.mixin.client.world;
 
 import ca.spottedleaf.starlight.common.world.ExtendedWorld;
 import net.minecraft.client.multiplayer.ClientChunkCache;
-import net.minecraft.client.multiplayer.MultiPlayerLevel;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -15,15 +15,16 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
-@Mixin(MultiPlayerLevel.class)
+@Mixin(ClientLevel.class)
 public abstract class ClientLevelMixin extends Level implements ExtendedWorld {
 
-    @Shadow public abstract ClientChunkCache getChunkSource();
-
-    protected ClientLevelMixin(LevelData levelData, DimensionType dimensionType, BiFunction<Level, Dimension, ChunkSource> biFunction, ProfilerFiller profilerFiller, boolean bl) {
-        super(levelData, dimensionType, biFunction, profilerFiller, bl);
+    protected ClientLevelMixin(LevelData levelData, DimensionType dimensionType, BiFunction<Level, Dimension, ChunkSource> biFunction, Supplier<ProfilerFiller> supplier, boolean bl) {
+        super(levelData, dimensionType, biFunction, supplier, bl);
     }
+
+    @Shadow public abstract ClientChunkCache getChunkSource();
 
     @Override
     public final LevelChunk getChunkAtImmediately(final int chunkX, final int chunkZ) {
