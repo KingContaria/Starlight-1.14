@@ -5,7 +5,6 @@ import ca.spottedleaf.starlight.common.chunk.ExtendedChunkSection;
 import ca.spottedleaf.starlight.common.util.CoordinateUtils;
 import ca.spottedleaf.starlight.common.util.IntegerUtil;
 import ca.spottedleaf.starlight.common.util.WorldUtil;
-import ca.spottedleaf.starlight.common.world.ExtendedWorld;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.shorts.ShortCollection;
 import it.unimi.dsi.fastutil.shorts.ShortIterator;
@@ -266,7 +265,8 @@ public abstract class StarLightEngine {
 
             final int chunkX = (index % 5) - this.chunkOffsetX;
             final int chunkZ = ((index / 5) % 5) - this.chunkOffsetZ;
-            final int chunkY = ((index / (5*5)) % (16 + 2 + 2)) - this.chunkOffsetY;
+            final int ySections = this.maxSection - this.minSection + 1;
+            final int chunkY = ((index / (5*5)) % (ySections + 2 + 2)) - this.chunkOffsetY;
             if ((nibble != null && nibble.updateVisible()) || this.notifyUpdateCache[index]) {
                 lightAccess.onLightUpdate(this.skylightPropagator ? LightLayer.SKY : LightLayer.BLOCK, SectionPos.of(chunkX, chunkY, chunkZ));
             }
@@ -290,7 +290,7 @@ public abstract class StarLightEngine {
             return section == EMPTY_CHUNK_SECTION ? AIR_BLOCK_STATE : section.getBlockState(worldX & 15, worldY & 15, worldZ & 15);
         }
 
-        return null;
+        return AIR_BLOCK_STATE;
     }
 
     protected final BlockState getBlockState(final int sectionIndex, final int localIndex) {
@@ -300,7 +300,7 @@ public abstract class StarLightEngine {
             return section == EMPTY_CHUNK_SECTION ? AIR_BLOCK_STATE : section.states.get(localIndex);
         }
 
-        return null;
+        return AIR_BLOCK_STATE;
     }
 
     protected final int getLightLevel(final int worldX, final int worldY, final int worldZ) {
@@ -388,12 +388,6 @@ public abstract class StarLightEngine {
         this.emptinessMapCache[chunkX + 5*chunkZ + this.chunkIndexOffset] = emptinessMap;
     }
 
-    protected final int getCustomLightLevel(final VariableBlockLightHandler customBlockHandler, final int worldX, final int worldY,
-                                            final int worldZ, final int dfl) {
-        final int ret = customBlockHandler.getLightLevel(worldX, worldY, worldZ);
-        return ret == -1 ? dfl : ret;
-    }
-
     protected final long getKnownTransparency(final int worldX, final int worldY, final int worldZ) {
         final LevelChunkSection section = this.sectionCache[(worldX >> 4) + 5 * (worldZ >> 4) + (5 * 5) * (worldY >> 4) + this.chunkSectionIndexOffset];
 
@@ -416,10 +410,6 @@ public abstract class StarLightEngine {
         return ExtendedChunkSection.BLOCK_IS_TRANSPARENT;
     }
 
-    /**
-     * @deprecated To be removed in 1.17 due to variable section count
-     */
-    @Deprecated
     public static SWMRNibbleArray[] getFilledEmptyLight() {
         return getFilledEmptyLight(16 - (-1) + 1);
     }
@@ -481,7 +471,7 @@ public abstract class StarLightEngine {
     // if ret == expect, then expect is the correct light value for pos
     // if ret < expect, then ret is the real light value
     protected abstract int calculateLightValue(final LightChunkGetter lightAccess, final int worldX, final int worldY, final int worldZ,
-                                               final int expect, final VariableBlockLightHandler customBlockLight);
+                                               final int expect);
 
     protected final int[] chunkCheckDelayedUpdatesCenter = new int[16 * 16];
     protected final int[] chunkCheckDelayedUpdatesNeighbour = new int[16 * 16];
@@ -541,7 +531,6 @@ public abstract class StarLightEngine {
                 startX = chunkX << 4;
             }
 
-            final VariableBlockLightHandler customLightHandler = ((ExtendedWorld)lightAccess.getLevel()).getCustomLightHandler();
             int centerDelayedChecks = 0;
             int neighbourDelayedChecks = 0;
             for (int currY = chunkY << 4, maxY = currY | 15; currY <= maxY; ++currY) {
@@ -564,11 +553,11 @@ public abstract class StarLightEngine {
                     // affect later calculate light value operations. While they don't affect it in a behaviourly significant
                     // way, they do have a negative performance impact due to simply queueing more values
 
-                    if (this.calculateLightValue(lightAccess, currX, currY, currZ, currentLevel, customLightHandler) != currentLevel) {
+                    if (this.calculateLightValue(lightAccess, currX, currY, currZ, currentLevel) != currentLevel) {
                         this.chunkCheckDelayedUpdatesCenter[centerDelayedChecks++] = currentIndex;
                     }
 
-                    if (this.calculateLightValue(lightAccess, neighbourX, currY, neighbourZ, neighbourLevel, customLightHandler) != neighbourLevel) {
+                    if (this.calculateLightValue(lightAccess, neighbourX, currY, neighbourZ, neighbourLevel) != neighbourLevel) {
                         this.chunkCheckDelayedUpdatesNeighbour[neighbourDelayedChecks++] = neighbourIndex;
                     }
                 }
@@ -788,12 +777,13 @@ public abstract class StarLightEngine {
 
         // update emptiness map
         for (int sectionIndex = (emptinessChanges.length - 1); sectionIndex >= 0; --sectionIndex) {
-            final Boolean valueBoxed = emptinessChanges[sectionIndex];
+            Boolean valueBoxed = emptinessChanges[sectionIndex];
             if (valueBoxed == null) {
-                if (needsInit) {
-                    throw new IllegalStateException("Current chunk has not initialised emptiness map yet supplied emptiness map isn't filled?");
+                if (!needsInit) {
+                    continue;
                 }
-                continue;
+                final LevelChunkSection section = this.getChunkSection(chunkX, sectionIndex + this.minSection, chunkZ);
+                emptinessChanges[sectionIndex] = valueBoxed = section == null || section.isEmpty() ? Boolean.TRUE : Boolean.FALSE;
             }
             chunkEmptinessMap[sectionIndex] = valueBoxed.booleanValue();
         }
@@ -942,7 +932,7 @@ public abstract class StarLightEngine {
             if (ret != null) {
                 this.setEmptinessMap(chunk, ret);
             }
-            this.lightChunk(lightAccess, chunk, true); // TODO
+            this.lightChunk(lightAccess, chunk, true);
             this.setNibbles(chunk, nibbles);
             this.updateVisible(lightAccess);
         } finally {
@@ -1074,17 +1064,16 @@ public abstract class StarLightEngine {
         }
     }
 
-    // old algorithm for propagating
-    // this is also the basic algorithm, the optimised algorithm is always going to be tested against this one
-    // and this one is always tested against vanilla
     // contains:
     // lower (6 + 6 + 16) = 28 bits: encoded coordinate position (x | (z << 6) | (y << (6 + 6))))
     // next 4 bits: propagated light level (0, 15]
     // next 6 bits: propagation direction bitset
     // next 24 bits: unused
-    // last 4 bits: state flags
+    // last 3 bits: state flags
     // state flags:
-    // whether the propagation must set the current position's light value (0 if decrease, propagated light level if increase)
+    // whether the increase propagator needs to write the propagated level to the position, used to avoid cascading light
+    // updates for block sources
+    protected static final long FLAG_WRITE_LEVEL = Long.MIN_VALUE >>> 2;
     // whether the propagation needs to check if its current level is equal to the expected level
     // used only in increase propagation
     protected static final long FLAG_RECHECK_LEVEL = Long.MIN_VALUE >>> 1;
@@ -1164,6 +1153,9 @@ public abstract class StarLightEngine {
                     // not at the level we expect, so something changed.
                     continue;
                 }
+            } else if ((queueValue & FLAG_WRITE_LEVEL) != 0L) {
+                // these are used to restore block sources after a propagation decrease
+                this.setLightLevel(posX, posY, posZ, propagatedLightLevel);
             }
 
             if ((queueValue & FLAG_HAS_SIDED_TRANSPARENT_BLOCKS) == 0L) {
@@ -1190,7 +1182,6 @@ public abstract class StarLightEngine {
                     if (opacityCached != -1) {
                         final int targetLevel = propagatedLightLevel - Math.max(1, opacityCached);
                         if (targetLevel > currentLevel) {
-
                             currentNibble.set(localIndex, targetLevel);
                             this.postLightUpdate(offX, offY, offZ);
 
@@ -1273,7 +1264,6 @@ public abstract class StarLightEngine {
                     if (opacityCached != -1) {
                         final int targetLevel = propagatedLightLevel - Math.max(1, opacityCached);
                         if (targetLevel > currentLevel) {
-
                             currentNibble.set(localIndex, targetLevel);
                             this.postLightUpdate(offX, offY, offZ);
 
@@ -1341,7 +1331,6 @@ public abstract class StarLightEngine {
         final int encodeOffset = this.coordinateOffset;
         final int sectionOffset = this.chunkSectionIndexOffset;
         final int emittedMask = this.emittedLightMask;
-        final VariableBlockLightHandler customLightHandler = this.skylightPropagator ? null : ((ExtendedWorld)world).getCustomLightHandler();
 
         while (queueReadIndex < queueLength) {
             final long queueValue = queue[queueReadIndex++];
@@ -1389,9 +1378,10 @@ public abstract class StarLightEngine {
                                             | FLAG_RECHECK_LEVEL;
                             continue;
                         }
-                        final int emittedLight = (customLightHandler != null ? this.getCustomLightLevel(customLightHandler, offX, offY, offZ, blockState.getLightEmission()) : blockState.getLightEmission()) & emittedMask;
+                        final int emittedLight = blockState.getLightEmission() & emittedMask;
                         if (emittedLight != 0) {
                             // re-propagate source
+                            // note: do not set recheck level, or else the propagation will fail
                             if (increaseQueueLength >= increaseQueue.length) {
                                 increaseQueue = this.resizeIncreaseQueue();
                             }
@@ -1399,10 +1389,10 @@ public abstract class StarLightEngine {
                                     ((offX + (offZ << 6) + (offY << 12) + encodeOffset) & ((1L << (6 + 6 + 16)) - 1))
                                             | ((emittedLight & 0xFL) << (6 + 6 + 16))
                                             | (((long)ALL_DIRECTIONS_BITSET) << (6 + 6 + 16 + 4))
-                                            | (((ExtendedAbstractBlockState)blockState).isConditionallyFullOpaque() ? FLAG_HAS_SIDED_TRANSPARENT_BLOCKS : 0L);
+                                            | (((ExtendedAbstractBlockState)blockState).isConditionallyFullOpaque() ? (FLAG_WRITE_LEVEL | FLAG_HAS_SIDED_TRANSPARENT_BLOCKS) : FLAG_WRITE_LEVEL);
                         }
 
-                        currentNibble.set(localIndex, emittedLight);
+                        currentNibble.set(localIndex, 0);
                         this.postLightUpdate(offX, offY, offZ);
 
                         if (targetLevel > 0) { // we actually need to propagate 0 just in case we find a neighbour...
@@ -1442,9 +1432,10 @@ public abstract class StarLightEngine {
                                             | (FLAG_RECHECK_LEVEL | flags);
                             continue;
                         }
-                        final int emittedLight = (customLightHandler != null ? this.getCustomLightLevel(customLightHandler, offX, offY, offZ, blockState.getLightEmission()) : blockState.getLightEmission()) & emittedMask;
+                        final int emittedLight = blockState.getLightEmission() & emittedMask;
                         if (emittedLight != 0) {
                             // re-propagate source
+                            // note: do not set recheck level, or else the propagation will fail
                             if (increaseQueueLength >= increaseQueue.length) {
                                 increaseQueue = this.resizeIncreaseQueue();
                             }
@@ -1452,10 +1443,10 @@ public abstract class StarLightEngine {
                                     ((offX + (offZ << 6) + (offY << 12) + encodeOffset) & ((1L << (6 + 6 + 16)) - 1))
                                             | ((emittedLight & 0xFL) << (6 + 6 + 16))
                                             | (((long)ALL_DIRECTIONS_BITSET) << (6 + 6 + 16 + 4))
-                                            | flags;
+                                            | (flags | FLAG_WRITE_LEVEL);
                         }
 
-                        currentNibble.set(localIndex, emittedLight);
+                        currentNibble.set(localIndex, 0);
                         this.postLightUpdate(offX, offY, offZ);
 
                         if (targetLevel > 0) {
@@ -1516,9 +1507,10 @@ public abstract class StarLightEngine {
                                             | FLAG_RECHECK_LEVEL;
                             continue;
                         }
-                        final int emittedLight = (customLightHandler != null ? this.getCustomLightLevel(customLightHandler, offX, offY, offZ, blockState.getLightEmission()) : blockState.getLightEmission()) & emittedMask;
+                        final int emittedLight = blockState.getLightEmission() & emittedMask;
                         if (emittedLight != 0) {
                             // re-propagate source
+                            // note: do not set recheck level, or else the propagation will fail
                             if (increaseQueueLength >= increaseQueue.length) {
                                 increaseQueue = this.resizeIncreaseQueue();
                             }
@@ -1526,10 +1518,10 @@ public abstract class StarLightEngine {
                                     ((offX + (offZ << 6) + (offY << 12) + encodeOffset) & ((1L << (6 + 6 + 16)) - 1))
                                             | ((emittedLight & 0xFL) << (6 + 6 + 16))
                                             | (((long)ALL_DIRECTIONS_BITSET) << (6 + 6 + 16 + 4))
-                                            | (((ExtendedAbstractBlockState)blockState).isConditionallyFullOpaque() ? FLAG_HAS_SIDED_TRANSPARENT_BLOCKS : 0L);
+                                            | (((ExtendedAbstractBlockState)blockState).isConditionallyFullOpaque() ? (FLAG_WRITE_LEVEL | FLAG_HAS_SIDED_TRANSPARENT_BLOCKS) : FLAG_WRITE_LEVEL);
                         }
 
-                        currentNibble.set(localIndex, emittedLight);
+                        currentNibble.set(localIndex, 0);
                         this.postLightUpdate(offX, offY, offZ);
 
                         if (targetLevel > 0) { // we actually need to propagate 0 just in case we find a neighbour...
@@ -1569,9 +1561,10 @@ public abstract class StarLightEngine {
                                             | (FLAG_RECHECK_LEVEL | flags);
                             continue;
                         }
-                        final int emittedLight = (customLightHandler != null ? this.getCustomLightLevel(customLightHandler, offX, offY, offZ, blockState.getLightEmission()) : blockState.getLightEmission()) & emittedMask;
+                        final int emittedLight = blockState.getLightEmission() & emittedMask;
                         if (emittedLight != 0) {
                             // re-propagate source
+                            // note: do not set recheck level, or else the propagation will fail
                             if (increaseQueueLength >= increaseQueue.length) {
                                 increaseQueue = this.resizeIncreaseQueue();
                             }
@@ -1579,10 +1572,10 @@ public abstract class StarLightEngine {
                                     ((offX + (offZ << 6) + (offY << 12) + encodeOffset) & ((1L << (6 + 6 + 16)) - 1))
                                             | ((emittedLight & 0xFL) << (6 + 6 + 16))
                                             | (((long)ALL_DIRECTIONS_BITSET) << (6 + 6 + 16 + 4))
-                                            | flags;
+                                            | (flags | FLAG_WRITE_LEVEL);
                         }
 
-                        currentNibble.set(localIndex, emittedLight);
+                        currentNibble.set(localIndex, 0);
                         this.postLightUpdate(offX, offY, offZ);
 
                         if (targetLevel > 0) { // we actually need to propagate 0 just in case we find a neighbour...

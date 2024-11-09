@@ -1,6 +1,5 @@
 package ca.spottedleaf.starlight.mixin.common.world;
 
-import ca.spottedleaf.starlight.common.light.VariableBlockLightHandler;
 import ca.spottedleaf.starlight.common.util.CoordinateUtils;
 import ca.spottedleaf.starlight.common.world.ExtendedWorld;
 import com.mojang.datafixers.util.Either;
@@ -20,7 +19,6 @@ import net.minecraft.world.level.storage.WritableLevelData;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.Unique;
 import java.util.function.Supplier;
 
 @Mixin(ServerLevel.class)
@@ -30,9 +28,6 @@ public abstract class ServerWorldMixin extends Level implements WorldGenLevel, E
     @Final
     private ServerChunkCache chunkSource;
 
-    @Unique
-    private VariableBlockLightHandler customBlockLightHandler;
-
     protected ServerWorldMixin(final WritableLevelData writableLevelData, final ResourceKey<Level> resourceKey,
                                final DimensionType dimensionType, final Supplier<ProfilerFiller> supplier, final boolean bl,
                                final boolean bl2, final long l) {
@@ -40,19 +35,9 @@ public abstract class ServerWorldMixin extends Level implements WorldGenLevel, E
     }
 
     @Override
-    public final VariableBlockLightHandler getCustomLightHandler() {
-        return this.customBlockLightHandler;
-    }
-
-    @Override
-    public final void setCustomLightHandler(final VariableBlockLightHandler handler) {
-        this.customBlockLightHandler = handler;
-    }
-
-    @Override
     public final LevelChunk getChunkAtImmediately(final int chunkX, final int chunkZ) {
         final ChunkMap storage = this.chunkSource.chunkMap;
-        final ChunkHolder holder = storage.getUpdatingChunkIfPresent(CoordinateUtils.getChunkKey(chunkX, chunkZ));
+        final ChunkHolder holder = storage.getVisibleChunkIfPresent(CoordinateUtils.getChunkKey(chunkX, chunkZ));
 
         if (holder == null) {
             return null;
@@ -66,7 +51,7 @@ public abstract class ServerWorldMixin extends Level implements WorldGenLevel, E
     @Override
     public final ChunkAccess getAnyChunkImmediately(final int chunkX, final int chunkZ) {
         final ChunkMap storage = this.chunkSource.chunkMap;
-        final ChunkHolder holder = storage.getUpdatingChunkIfPresent(CoordinateUtils.getChunkKey(chunkX, chunkZ));
+        final ChunkHolder holder = storage.getVisibleChunkIfPresent(CoordinateUtils.getChunkKey(chunkX, chunkZ));
 
         return holder == null ? null : holder.getLastAvailable();
     }
